@@ -1,4 +1,4 @@
-# Converter
+# min convert
 
 A modern Python application for converting between different file types.
 
