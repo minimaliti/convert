@@ -1,0 +1,34 @@
+{
+  "web": {
+    "name": "Web Optimized (JPEG 85%)",
+    "format": "jpeg",
+    "quality": 85,
+    "resize": false,
+    "width": 800,
+    "height": 600
+  },
+  "webp": {
+    "name": "Small WebP",
+    "format": "webp",
+    "quality": 75,
+    "resize": false,
+    "width": 800,
+    "height": 600
+  },
+  "thumb": {
+    "name": "Thumbnail (200x200)",
+    "format": "jpeg",
+    "quality": 80,
+    "resize": true,
+    "width": 200,
+    "height": 200
+  },
+  "custom1": {
+    "name": "+",
+    "format": "png",
+    "quality": 85,
+    "resize": false,
+    "width": 800,
+    "height": 600
+  }
+}
