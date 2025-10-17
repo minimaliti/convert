@@ -282,7 +282,7 @@ class FileListWidget(QListWidget):
 class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle('min convert')
+        self.setWindowTitle('min image convert')
         self.setMinimumSize(750, 520)
 
         # State
@@ -320,7 +320,7 @@ class MainWindow(QWidget):
         layout.addLayout(self._create_action_section())
 
         # Status bar
-        self.status = QLabel('Ready • Drag files here or press Ctrl+O')
+        self.status = QLabel('Ready • Drag images here or press Ctrl+O')
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
 
@@ -331,12 +331,12 @@ class MainWindow(QWidget):
 
     def _create_file_list_section(self) -> QGroupBox:
         """Create file list section."""
-        group = QGroupBox('Files to Convert')
+        group = QGroupBox('Images to Convert')
         layout = QVBoxLayout()
 
         # Top bar with count and buttons
         top_bar = QHBoxLayout()
-        self.file_count_label = QLabel('(0 files)')
+        self.file_count_label = QLabel('(0 images)')
         top_bar.addWidget(self.file_count_label)
         top_bar.addStretch()
 
@@ -916,12 +916,12 @@ class MainWindow(QWidget):
         """Show about dialog."""
         QMessageBox.about(
             self, 'About',
-            '<h3>min convert</h3>'
+            '<h3>min image convert</h3>'
             '<p><b>Version:</b> b0.2</p>'
-            '<p>Simple, efficient batch file converter</p>'
+            '<p>Simple, efficient batch image converter</p>'
             '<p><b>Libraries:</b> PyQt6, Pillow</p>'
             '<p><b>License:</b> <a href="https://opensource.org/licenses/MIT">MIT</a></p>'
-            '<p><a href="https://github.com/minimaliti/convert/">GitHub</a></p>'
+            '<p><a href="https://github.com/minimaliti/imgconvert/">GitHub</a></p>'
         )
 
     def closeEvent(self, event):

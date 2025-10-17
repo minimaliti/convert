@@ -1,4 +1,4 @@
-# min convert
+# min image convert
 
 A modern Python application for converting between different file types.
 
