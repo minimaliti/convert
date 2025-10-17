@@ -15,6 +15,7 @@ from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject, QMimeData
 from PyQt6.QtGui import QKeySequence, QShortcut, QDragEnterEvent, QDropEvent
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import os
+import subprocess
 
 
 # ============================================================================
@@ -281,7 +282,7 @@ class FileListWidget(QListWidget):
 class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle('Minimal Image Converter')
+        self.setWindowTitle('min convert')
         self.setMinimumSize(750, 520)
 
         # State
@@ -383,12 +384,15 @@ class MainWindow(QWidget):
         self.output_edit.setPlaceholderText(
             'Output folder (leave empty to use input folder)'
         )
-        btn = QPushButton('Browse...')
-        btn.clicked.connect(self.choose_folder)
-        
+        browse_btn = QPushButton('Browse...')
+        browse_btn.clicked.connect(self.choose_folder)
+        open_btn = QPushButton('Open')
+        open_btn.clicked.connect(self.open_output_folder)
+
         layout.addWidget(QLabel('Output:'))
         layout.addWidget(self.output_edit, 1)
-        layout.addWidget(btn)
+        layout.addWidget(browse_btn)
+        layout.addWidget(open_btn)
         return layout
 
     def _create_options_section(self) -> QHBoxLayout:
@@ -666,6 +670,30 @@ class MainWindow(QWidget):
             self.last_output_dir = folder
             self.output_edit.setText(folder)
 
+    def open_output_folder(self):
+        """Open the folder provided in the output field."""
+        folder = self.output_edit.text().strip()
+        if not folder:
+            QMessageBox.information(self, "Open Folder", "No output folder specified.")
+            return
+        path = Path(folder)
+        if not path.exists():
+            QMessageBox.warning(self, "Open Folder", "Folder does not exist.")
+            return
+        if not path.is_dir():
+            path = path.parent
+        try:
+            if sys.platform.startswith('darwin'):
+                subprocess.Popen(['open', str(path)])
+            elif os.name == 'nt':
+                os.startfile(str(path))
+            elif os.name == 'posix':
+                subprocess.Popen(['xdg-open', str(path)])
+            else:
+                QMessageBox.warning(self, "Open Folder", "Unsupported OS.")
+        except Exception as e:
+            QMessageBox.warning(self, "Open Folder", f"Could not open folder:\n{e}")
+
     # ========================================================================
     # Preset Management
     # ========================================================================
@@ -888,11 +916,12 @@ class MainWindow(QWidget):
         """Show about dialog."""
         QMessageBox.about(
             self, 'About',
-            '<h3>converter</h3>'
-            '<p><b>Version:</b> 0.2</p>'
+            '<h3>min convert</h3>'
+            '<p><b>Version:</b> b0.2</p>'
             '<p>Simple, efficient batch file converter</p>'
             '<p><b>Libraries:</b> PyQt6, Pillow</p>'
             '<p><b>License:</b> <a href="https://opensource.org/licenses/MIT">MIT</a></p>'
+            '<p><a href="https://github.com/minimaliti/convert/">GitHub</a></p>'
         )
 
     def closeEvent(self, event):
