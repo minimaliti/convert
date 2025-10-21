@@ -1170,7 +1170,7 @@ class MainWindow(QWidget):
         QMessageBox.about(
             self, 'About',
             '<h3>min image convert</h3>'
-            '<p><b>Version:</b> b0.2</p>'
+            '<p><b>Version:</b> b0.3</p>'
             '<p>Simple, efficient batch image converter</p>'
             '<p><b>Libraries:</b> PySide6, Pillow</p>'
             '<p><b>License:</b> <a href="https://opensource.org/licenses/MIT">MIT</a></p>'
