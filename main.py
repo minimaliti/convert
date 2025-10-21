@@ -5,14 +5,14 @@ import json
 from typing import Optional, List, Dict, Tuple
 from dataclasses import dataclass
 
-from PyQt6.QtWidgets import (
+from PySide6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QFileDialog, QComboBox, QSpinBox, QProgressBar, QCheckBox, QMessageBox,
     QLineEdit, QListWidget, QListWidgetItem, QGroupBox, QProgressDialog,
     QDialog, QFormLayout, QDialogButtonBox
 )
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject, QMimeData
-from PyQt6.QtGui import QKeySequence, QShortcut, QDragEnterEvent, QDropEvent
+from PySide6.QtCore import Qt, QThread, Signal, QObject, QMimeData
+from PySide6.QtGui import QKeySequence, QShortcut, QDragEnterEvent, QDropEvent
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import os
 import subprocess
@@ -108,9 +108,9 @@ class ConfigManager:
 class FileLoaderThread(QThread):
     """Loads and validates image files in background."""
 
-    progress = pyqtSignal(int, int, str)  # current, total, filename
-    file_found = pyqtSignal(str, str)  # path, display_name
-    finished = pyqtSignal(int)  # files_added
+    progress = Signal(int, int, str)  # current, total, filename
+    file_found = Signal(str, str)  # path, display_name
+    finished = Signal(int)  # files_added
 
     def __init__(self, paths: List[str] = None, folder: str = None, 
                  existing_paths: set = None):
@@ -165,9 +165,9 @@ class FileLoaderThread(QThread):
 class ConversionWorker(QObject):
     """Handles batch image conversion."""
 
-    progress = pyqtSignal(int, int)  # current, total
-    job_completed = pyqtSignal(bool, str)  # success, message
-    all_done = pyqtSignal(int, int)  # success_count, total_count
+    progress = Signal(int, int)  # current, total
+    job_completed = Signal(bool, str)  # success, message
+    all_done = Signal(int, int)  # success_count, total_count
 
     def __init__(self, jobs: List[ConversionJob], max_workers: int = None):
         super().__init__()
@@ -246,7 +246,7 @@ class ConversionWorker(QObject):
 class FileListWidget(QListWidget):
     """Custom list widget with drag-and-drop support."""
 
-    files_dropped = pyqtSignal(list)  # List of file paths
+    files_dropped = Signal(list)  # List of file paths
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -583,7 +583,7 @@ class MainWindow(QWidget):
             'Loading files...', 'Cancel', 0, count, self
         )
         self.progress_dialog.setWindowModality(Qt.WindowModality.WindowModal)
-        self.progress_dialog.setWindowTitle('Loading')
+        self.progress_dialog.setWindowTitle('Adding files')
         self.progress_dialog.setMinimumDuration(300)
 
         self.file_loader_thread = FileLoaderThread(paths, folder, existing_paths)
@@ -596,11 +596,12 @@ class MainWindow(QWidget):
 
     def _on_load_progress(self, current: int, total: int, filename: str):
         """Update loading progress."""
-        if self.progress_dialog:
+        if self.progress_dialog is not None:
             self.progress_dialog.setMaximum(total)
             self.progress_dialog.setValue(current)
-            self.progress_dialog.setLabelText(f'Loading: {filename}')
-
+            self.progress_dialog.setLabelText(f'<div align="left">Adding: {filename}</div>')
+            # QProgressDialog does not support setAlignment, but we can left-align the label text using HTML
+            
     def _on_file_found(self, path: str, name: str):
         """Add validated file to list."""
         item = QListWidgetItem(name)
@@ -919,7 +920,7 @@ class MainWindow(QWidget):
             '<h3>min image convert</h3>'
             '<p><b>Version:</b> b0.2</p>'
             '<p>Simple, efficient batch image converter</p>'
-            '<p><b>Libraries:</b> PyQt6, Pillow</p>'
+            '<p><b>Libraries:</b> PySide6, Pillow</p>'
             '<p><b>License:</b> <a href="https://opensource.org/licenses/MIT">MIT</a></p>'
             '<p><a href="https://github.com/minimaliti/imgconvert/">GitHub</a></p>'
         )
