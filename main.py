@@ -276,6 +276,59 @@ class FileListWidget(QListWidget):
 
 
 # ============================================================================
+# Overwrite Dialog
+# ============================================================================
+
+class OverwriteDialog(QDialog):
+    """Dialog for handling file overwrite conflicts."""
+
+    def __init__(self, file_path: str, parent=None):
+        super().__init__(parent)
+        self.file_path = file_path
+        self.choice = None  # 'overwrite', 'rename', 'skip'
+        self.apply_all = False
+        self._init_ui()
+
+    def _init_ui(self):
+        self.setWindowTitle('File Already Exists')
+        self.setModal(True)
+        layout = QVBoxLayout()
+
+        # Message
+        msg = QLabel(f'The file "{Path(self.file_path).name}" already exists.\nWhat would you like to do?')
+        msg.setWordWrap(True)
+        layout.addWidget(msg)
+
+        # Buttons
+        button_layout = QHBoxLayout()
+        
+        overwrite_btn = QPushButton('Overwrite')
+        overwrite_btn.clicked.connect(lambda: self._set_choice('overwrite'))
+        button_layout.addWidget(overwrite_btn)
+
+        rename_btn = QPushButton('Rename')
+        rename_btn.clicked.connect(lambda: self._set_choice('rename'))
+        button_layout.addWidget(rename_btn)
+
+        skip_btn = QPushButton('Skip')
+        skip_btn.clicked.connect(lambda: self._set_choice('skip'))
+        button_layout.addWidget(skip_btn)
+
+        layout.addLayout(button_layout)
+
+        # Apply to all checkbox
+        self.apply_all_cb = QCheckBox('Apply to all remaining conflicts')
+        layout.addWidget(self.apply_all_cb)
+
+        self.setLayout(layout)
+
+    def _set_choice(self, choice: str):
+        self.choice = choice
+        self.apply_all = self.apply_all_cb.isChecked()
+        self.accept()
+
+
+# ============================================================================
 # Main Window
 # ============================================================================
 
@@ -850,7 +903,48 @@ class MainWindow(QWidget):
             out_path = self._determine_output_path(inp_path, output_text, fmt, len(inputs))
             jobs.append(ConversionJob(str(inp_path), str(out_path), fmt, quality, size))
 
-        return jobs
+        # Check for overwrite conflicts
+        resolved_jobs = []
+        apply_all_choice = None
+        for job in jobs:
+            out_path = Path(job.output_path)
+            if out_path.exists():
+                if apply_all_choice is not None:
+                    choice = apply_all_choice
+                else:
+                    dialog = OverwriteDialog(job.output_path, self)
+                    dialog.exec()
+                    choice = dialog.choice
+                    if dialog.apply_all:
+                        apply_all_choice = choice
+                
+                if choice == 'overwrite':
+                    resolved_jobs.append(job)
+                elif choice == 'rename':
+                    new_path = self._generate_unique_path(out_path)
+                    resolved_jobs.append(ConversionJob(job.input_path, str(new_path), job.format, job.quality, job.size))
+                elif choice == 'skip':
+                    continue  # Skip this job
+            else:
+                resolved_jobs.append(job)
+
+        return resolved_jobs
+
+    def _generate_unique_path(self, path: Path) -> Path:
+        """Generate a unique path by adding a suffix if needed."""
+        if not path.exists():
+            return path
+        
+        stem = path.stem
+        suffix = path.suffix
+        parent = path.parent
+        
+        counter = 1
+        while True:
+            new_path = parent / f"{stem} ({counter}){suffix}"
+            if not new_path.exists():
+                return new_path
+            counter += 1
 
     def _determine_output_path(self, inp_path: Path, output_text: str, 
                                fmt: str, total_files: int) -> Path:
