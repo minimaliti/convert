@@ -5,7 +5,7 @@
 #define MyAppVersion "b0.3"
 #define MyAppPublisher "minimaliti"
 #define MyAppURL "https://www.github.com/minimaliti/imgconvert"
-#define MyAppExeName "main.exe"
+#define MyAppExeName "minimgconvert.exe"
 
 [Setup]
 ; NOTE: The value of AppId uniquely identifies this application. Do not use the same AppId value in installers for other applications.
