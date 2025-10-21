@@ -174,5 +174,7 @@ cython_debug/
 .pypirc
 
 testFolder
+main.dist
+main.build
 
 config.json
