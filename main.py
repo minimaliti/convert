@@ -176,12 +176,12 @@ class ConversionWorker(QObject):
         self.completed = 0
         self.failed = []
 
-    def run(self):
-        """Execute all conversion jobs."""
+    def run(self, delete_original: bool = False):
+        """Execute all conversion jobs, deleting originals if requested."""
         total = len(self.jobs)
         
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            future_to_job = {executor.submit(self._convert_image, job): job 
+            future_to_job = {executor.submit(self._convert_image, job, delete_original): job 
                            for job in self.jobs}
             
             for future in as_completed(future_to_job):
@@ -200,8 +200,8 @@ class ConversionWorker(QObject):
         success_count = total - len(self.failed)
         self.all_done.emit(success_count, total)
 
-    def _convert_image(self, job: ConversionJob) -> Tuple[bool, str]:
-        """Convert a single image."""
+    def _convert_image(self, job: ConversionJob, delete_original: bool = False) -> Tuple[bool, str]:
+        """Convert a single image and optionally delete the original if successful."""
         try:
             # Check format support
             if not self._check_format_support(job.input_path):
@@ -224,6 +224,13 @@ class ConversionWorker(QObject):
                     save_kwargs['quality'] = job.quality
 
                 img.save(job.output_path, job.format.upper(), **save_kwargs)
+
+            # Delete original if requested and output is not the same as input
+            if delete_original and job.input_path != job.output_path:
+                try:
+                    Path(job.input_path).unlink()
+                except Exception as e:
+                    return False, f"Converted but failed to delete original: {Path(job.input_path).name}: {str(e)}"
 
             return True, job.output_path
 
@@ -348,6 +355,7 @@ class MainWindow(QWidget):
         self.file_loader_thread = None
         self.progress_dialog = None
         self.conversion_thread = None
+        self.current_jobs = []
 
         self._init_ui()
         self._setup_shortcuts()
@@ -486,6 +494,10 @@ class MainWindow(QWidget):
         layout.addWidget(self.width_spin)
         layout.addWidget(QLabel('H:'))
         layout.addWidget(self.height_spin)
+
+        # Delete original files option
+        self.delete_original_check = QCheckBox('Delete originals after conversion')
+        layout.addWidget(self.delete_original_check)
 
         return layout
 
@@ -871,17 +883,34 @@ class MainWindow(QWidget):
         if not jobs:
             return
 
-        # Start conversion
-        self.convert_btn.setEnabled(False)
-        self.progress_bar.setValue(0)
-        self.status.setText(f'Converting {len(jobs)} file{"s" if len(jobs) != 1 else ""}...')
+        self.current_jobs = jobs  # Store for deletion after conversion
+
+        # Determine if originals should be deleted (with double confirmation)
+        delete_original = False
+        if self.delete_original_check.isChecked():
+            reply1 = QMessageBox.question(
+                self, 'Delete Original Files',
+                f'Are you sure you want to delete the {len(jobs)} original file{"s" if len(jobs) != 1 else ""} after conversion?',
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No
+            )
+            if reply1 == QMessageBox.StandardButton.Yes:
+                reply2 = QMessageBox.question(
+                    self, 'Confirm Deletion',
+                    'This action cannot be undone. Really delete the original files after conversion?',
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No
+                )
+                if reply2 == QMessageBox.StandardButton.Yes:
+                    delete_original = True
 
         # Run conversion in thread
         self.conversion_thread = QThread()
         self.conversion_worker = ConversionWorker(jobs)
         self.conversion_worker.moveToThread(self.conversion_thread)
         
-        self.conversion_thread.started.connect(self.conversion_worker.run)
+        # Pass delete_original to worker
+        self.conversion_thread.started.connect(lambda: self.conversion_worker.run(delete_original))
         self.conversion_worker.progress.connect(self._on_conversion_progress)
         self.conversion_worker.all_done.connect(self._on_conversion_finished)
         
