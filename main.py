@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
     QDialog, QFormLayout, QDialogButtonBox
 )
 from PySide6.QtCore import Qt, QThread, Signal, QObject, QMimeData
-from PySide6.QtGui import QKeySequence, QShortcut, QDragEnterEvent, QDropEvent
+from PySide6.QtGui import QKeySequence, QShortcut, QDragEnterEvent, QDropEvent, QIcon
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import os
 import subprocess
@@ -431,6 +431,23 @@ class MainWindow(QWidget):
         super().__init__()
         self.setWindowTitle('min image convert')
         self.setMinimumSize(750, 520)
+
+        # Set window icon if available (also set in main() for app-wide icon)
+        try:
+            base_assets = Path(__file__).parent / 'assets'
+            svg_icon = base_assets / 'icon.svg'
+            ico_icon = base_assets / 'icon.ico'
+            icon_path = None
+            if svg_icon.exists():
+                icon_path = str(svg_icon)
+            elif ico_icon.exists():
+                icon_path = str(ico_icon)
+
+            if icon_path:
+                self.setWindowIcon(QIcon(icon_path))
+                logger.debug(f"Window icon set: {icon_path}")
+        except Exception:
+            logger.exception("Failed to set window icon")
 
         # State
         self.config_manager = ConfigManager()
@@ -1213,6 +1230,24 @@ class MainWindow(QWidget):
 
 def main():
     app = QApplication(sys.argv)
+
+    # Try to set an application-wide icon (prefers SVG then ICO in assets/)
+    try:
+        base_assets = Path(__file__).parent / 'assets'
+        svg_icon = base_assets / 'icon.svg'
+        ico_icon = base_assets / 'icon.ico'
+        icon_path = None
+        if svg_icon.exists():
+            icon_path = str(svg_icon)
+        elif ico_icon.exists():
+            icon_path = str(ico_icon)
+
+        if icon_path:
+            app.setWindowIcon(QIcon(icon_path))
+            logger.debug(f"Application icon set: {icon_path}")
+    except Exception:
+        logger.exception("Failed to set application icon")
+
     window = MainWindow()
     window.show()
     sys.exit(app.exec())

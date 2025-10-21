@@ -13,5 +13,5 @@ A modern Python application for converting between different file types.
 ## Build
 You need to have nuitka installed for building.
 ```bash
-python -m nuitka main.py --enable-plugin=pyside6 --windows-console-mode=disable --mode=standalone --output-filename=minimgconvert.exe
+python -m nuitka main.py --enable-plugin=pyside6 --windows-console-mode=disable --mode=standalone --output-filename=minimgconvert.exe --windows-icon-from-ico=assets/icon.ico
 ```
