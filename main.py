@@ -133,21 +133,40 @@ class FileLoaderThread(QThread):
             files_to_check = [Path(p) for p in self.paths if p]
 
         total = len(files_to_check)
+        if total == 0:
+            self.finished.emit(0)
+            return
 
-        for idx, path in enumerate(files_to_check):
-            if self._stop:
-                break
+        # Use a thread pool to validate images in parallel and emit progress as tasks complete.
+        max_workers = min(8, os.cpu_count() or 2)
+        processed = 0
 
-            display_name = path.name[:47] + '...' if len(path.name) > 50 else path.name
-            self.progress.emit(idx + 1, total, display_name)
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_path = {executor.submit(self._validate_image, path): path for path in files_to_check}
 
-            path_str = str(path)
-            if path_str in self.existing_paths:
-                continue
+            for future in as_completed(future_to_path):
+                if self._stop:
+                    break
 
-            if self._validate_image(path):
-                self.file_found.emit(path_str, path.name)
-                added += 1
+                path = future_to_path[future]
+                processed += 1
+
+                display_name = path.name[:47] + '...' if len(path.name) > 50 else path.name
+                try:
+                    valid = future.result()
+                except Exception:
+                    valid = False
+
+                # Emit progress with how many have completed and the current filename
+                self.progress.emit(processed, total, display_name)
+
+                path_str = str(path)
+                if path_str in self.existing_paths:
+                    continue
+
+                if valid:
+                    self.file_found.emit(path_str, path.name)
+                    added += 1
 
         self.finished.emit(added)
 
@@ -664,7 +683,8 @@ class MainWindow(QWidget):
         if self.progress_dialog is not None:
             self.progress_dialog.setMaximum(total)
             self.progress_dialog.setValue(current)
-            self.progress_dialog.setLabelText(f'<div align="left">Adding: {filename}</div>')
+            if self.progress_dialog is not None: # because that works for some reason
+                self.progress_dialog.setLabelText(f'<div align="left">Adding: {filename}</div>')
             # QProgressDialog does not support setAlignment, but we can left-align the label text using HTML
             
     def _on_file_found(self, path: str, name: str):
