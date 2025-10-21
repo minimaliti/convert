@@ -615,19 +615,33 @@ class MainWindow(QWidget):
         """Handle files/folders dropped onto the list."""
         files = []
         folders = []
-        
+
         for path in paths:
             p = Path(path)
             if p.is_file():
                 files.append(str(p))
             elif p.is_dir():
                 folders.append(str(p))
-        
-        if files:
-            self._load_files(files)
-        
+
+        # Collect files from all dropped folders and add them together to a single loader.
         for folder in folders:
-            self._load_folder(folder)
+            try:
+                for p in Path(folder).iterdir():
+                    if p.is_file():
+                        files.append(str(p))
+            except Exception:
+                # Ignore folders we can't read and continue with others
+                continue
+
+        if files:
+            # Deduplicate while preserving order
+            seen = set()
+            uniq_files = []
+            for f in files:
+                if f not in seen:
+                    seen.add(f)
+                    uniq_files.append(f)
+            self._load_files(uniq_files)
 
     def add_files(self):
         """Open file dialog to add files."""
