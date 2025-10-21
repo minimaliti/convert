@@ -16,6 +16,40 @@ from PySide6.QtGui import QKeySequence, QShortcut, QDragEnterEvent, QDropEvent
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import os
 import subprocess
+import logging
+import threading
+
+
+# Enable logging when script is run with -l/--log; enable tracing only with -lt/--log-traces
+ARGS = sys.argv[1:]
+LOG = any(arg in ('--log', '-l') for arg in ARGS)
+TRACE = any(arg in ('--log-traces', '-lt') for arg in ARGS)
+
+logger = logging.getLogger('imgconvert')
+_handler = logging.StreamHandler()
+_formatter = logging.Formatter('[%(asctime)s] %(levelname)s: %(message)s')
+_handler.setFormatter(_formatter)
+logger.addHandler(_handler)
+logger.setLevel(logging.DEBUG if (LOG or TRACE) else logging.WARNING)
+
+if TRACE:
+    logger.debug('Tracing enabled (full trace mode)')
+    def _trace_calls(frame, event, arg):
+        try:
+            co = frame.f_code
+            func = co.co_name
+            filename = co.co_filename
+            lineno = frame.f_lineno
+            logger.debug(f'{event.upper()}: {func} - {filename}:{lineno}')
+        except Exception:
+            # Avoid the tracer raising
+            pass
+        return _trace_calls
+
+    sys.settrace(_trace_calls)
+    threading.settrace(_trace_calls)
+elif LOG:
+    logger.debug('Logging enabled (debug messages)')
 
 
 # ============================================================================
@@ -79,14 +113,16 @@ class ConfigManager:
         """Load presets from config file or return defaults."""
         if not self.config_path.exists():
             self.save(self.DEFAULT_PRESETS)
+            logger.debug("Config file did not exist; saved default presets.")
             return self.DEFAULT_PRESETS.copy()
 
         try:
             with open(self.config_path, 'r') as f:
                 data = json.load(f)
+                logger.debug(f"Loaded config from {self.config_path}")
                 return {key: Preset.from_dict(val) for key, val in data.items()}
         except (json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
-            print(f"Config error: {e}. Using defaults.")
+            logger.exception(f"Config error: {e}. Using defaults.")
             self.config_path.unlink(missing_ok=True)
             self.save(self.DEFAULT_PRESETS)
             return self.DEFAULT_PRESETS.copy()
@@ -97,8 +133,9 @@ class ConfigManager:
             data = {key: preset.to_dict() for key, preset in presets.items()}
             with open(self.config_path, 'w') as f:
                 json.dump(data, f, indent=2)
+            logger.debug(f"Saved config to {self.config_path}")
         except Exception as e:
-            print(f"Failed to save config: {e}")
+            logger.exception(f"Failed to save config: {e}")
 
 
 # ============================================================================
@@ -128,13 +165,20 @@ class FileLoaderThread(QThread):
         files_to_check = []
 
         if self.folder:
-            files_to_check = [p for p in Path(self.folder).iterdir() if p.is_file()]
+            try:
+                # Recursively gather files from the folder and subfolders
+                files_to_check = [p for p in Path(self.folder).rglob('*') if p.is_file()]
+            except Exception:
+                files_to_check = []
+                logger.exception(f"Failed to iterate folder recursively: {self.folder}")
         else:
             files_to_check = [Path(p) for p in self.paths if p]
 
         total = len(files_to_check)
+        logger.debug(f"FileLoaderThread starting: total={total} folder={self.folder} paths={len(self.paths)}")
         if total == 0:
             self.finished.emit(0)
+            logger.debug("FileLoaderThread finished immediately (no files).")
             return
 
         # Use a thread pool to validate images in parallel and emit progress as tasks complete.
@@ -146,6 +190,7 @@ class FileLoaderThread(QThread):
 
             for future in as_completed(future_to_path):
                 if self._stop:
+                    logger.debug("FileLoaderThread stopped by user.")
                     break
 
                 path = future_to_path[future]
@@ -154,21 +199,28 @@ class FileLoaderThread(QThread):
                 display_name = path.name[:47] + '...' if len(path.name) > 50 else path.name
                 try:
                     valid = future.result()
-                except Exception:
+                except Exception as e:
+                    logger.exception(f"Error validating image {path}: {e}")
                     valid = False
 
                 # Emit progress with how many have completed and the current filename
                 self.progress.emit(processed, total, display_name)
+                logger.debug(f"FileLoaderThread progress: {processed}/{total} - {display_name}")
 
                 path_str = str(path)
                 if path_str in self.existing_paths:
+                    logger.debug(f"Skipping already-added file: {path_str}")
                     continue
 
                 if valid:
+                    logger.debug(f"Valid image: {path_str}")
                     self.file_found.emit(path_str, path.name)
                     added += 1
+                else:
+                    logger.debug(f"Invalid image (skipped): {path_str}")
 
         self.finished.emit(added)
+        logger.debug(f"FileLoaderThread finished: added={added}")
 
     @staticmethod
     def _validate_image(path: Path) -> bool:
@@ -198,6 +250,7 @@ class ConversionWorker(QObject):
     def run(self, delete_original: bool = False):
         """Execute all conversion jobs, deleting originals if requested."""
         total = len(self.jobs)
+        logger.debug(f"ConversionWorker starting: total_jobs={total} delete_original={delete_original}")
         
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             future_to_job = {executor.submit(self._convert_image, job, delete_original): job 
@@ -206,24 +259,32 @@ class ConversionWorker(QObject):
             for future in as_completed(future_to_job):
                 self.completed += 1
                 self.progress.emit(self.completed, total)
-                
+                logger.debug(f"ConversionWorker progress: {self.completed}/{total}")
+
                 try:
                     success, message = future.result()
                     self.job_completed.emit(success, message)
                     if not success:
+                        logger.debug(f"Conversion failed: {message}")
                         self.failed.append(message)
+                    else:
+                        logger.debug(f"Conversion succeeded: {message}")
                 except Exception as e:
+                    logger.exception(f"Unexpected error in conversion: {e}")
                     self.job_completed.emit(False, str(e))
                     self.failed.append(str(e))
 
         success_count = total - len(self.failed)
+        logger.debug(f"ConversionWorker finished: success={success_count} total={total} failed={len(self.failed)}")
         self.all_done.emit(success_count, total)
 
     def _convert_image(self, job: ConversionJob, delete_original: bool = False) -> Tuple[bool, str]:
         """Convert a single image and optionally delete the original if successful."""
+        logger.debug(f"Converting: {job.input_path} -> {job.output_path} fmt={job.format} size={job.size}")
         try:
             # Check format support
             if not self._check_format_support(job.input_path):
+                logger.debug(f"Unsupported format for: {job.input_path}")
                 return False, f"Format not supported: {job.input_path}"
 
             with Image.open(job.input_path) as img:
@@ -243,17 +304,21 @@ class ConversionWorker(QObject):
                     save_kwargs['quality'] = job.quality
 
                 img.save(job.output_path, job.format.upper(), **save_kwargs)
+                logger.debug(f"Saved output: {job.output_path}")
 
             # Delete original if requested and output is not the same as input
             if delete_original and job.input_path != job.output_path:
                 try:
                     Path(job.input_path).unlink()
+                    logger.debug(f"Deleted original: {job.input_path}")
                 except Exception as e:
+                    logger.exception(f"Failed to delete original {job.input_path}: {e}")
                     return False, f"Converted but failed to delete original: {Path(job.input_path).name}: {str(e)}"
 
             return True, job.output_path
 
         except Exception as e:
+            logger.exception(f"Error converting {job.input_path}: {e}")
             return False, f"{Path(job.input_path).name}: {str(e)}"
 
     @staticmethod
@@ -261,6 +326,7 @@ class ConversionWorker(QObject):
         """Check if image format is supported."""
         ext = Path(path).suffix.lower().lstrip('.')
         if ext == 'webp' and not features.check('webp'):
+            logger.debug("WebP not supported by Pillow on this system.")
             return False
         return True
 
@@ -295,6 +361,7 @@ class FileListWidget(QListWidget):
     def dropEvent(self, event: QDropEvent):
         if event.mimeData().hasUrls():
             paths = [url.toLocalFile() for url in event.mimeData().urls()]
+            logger.debug(f"Files dropped: {paths}")
             self.files_dropped.emit(paths)
             event.acceptProposedAction()
         else:
@@ -351,6 +418,7 @@ class OverwriteDialog(QDialog):
     def _set_choice(self, choice: str):
         self.choice = choice
         self.apply_all = self.apply_all_cb.isChecked()
+        logger.debug(f"Overwrite dialog choice: {choice} apply_all={self.apply_all} file={self.file_path}")
         self.accept()
 
 
@@ -379,6 +447,7 @@ class MainWindow(QWidget):
         self._init_ui()
         self._setup_shortcuts()
         self._connect_signals()
+        logger.debug("MainWindow initialized")
 
     def _init_ui(self):
         """Initialize user interface."""
@@ -626,11 +695,13 @@ class MainWindow(QWidget):
         # Collect files from all dropped folders and add them together to a single loader.
         for folder in folders:
             try:
-                for p in Path(folder).iterdir():
+                # recursively include files in subfolders
+                for p in Path(folder).rglob('*'):
                     if p.is_file():
                         files.append(str(p))
             except Exception:
                 # Ignore folders we can't read and continue with others
+                logger.exception(f"Failed to iterate folder recursively: {folder}")
                 continue
 
         if files:
@@ -675,8 +746,16 @@ class MainWindow(QWidget):
     def _start_file_loader(self, paths: List[str] = None, folder: str = None,
                           existing_paths: set = None):
         """Start file loading thread with progress dialog."""
-        count = len(paths) if paths else sum(1 for _ in Path(folder).iterdir())
-        
+        if paths:
+            count = len(paths)
+        else:
+            try:
+                count = sum(1 for p in Path(folder).rglob('*') if p.is_file())
+            except Exception:
+                logger.exception(f"Failed to count files recursively in folder: {folder}")
+                count = 0
+        logger.debug(f"Starting file loader: count={count} folder={folder} paths_provided={bool(paths)}")
+
         self.progress_dialog = QProgressDialog(
             'Loading files...', 'Cancel', 0, count, self
         )
@@ -691,9 +770,11 @@ class MainWindow(QWidget):
         self.progress_dialog.canceled.connect(self._on_load_canceled)
         
         self.file_loader_thread.start()
+        logger.debug("FileLoaderThread started (QThread)")
 
     def _on_load_progress(self, current: int, total: int, filename: str):
         """Update loading progress."""
+        logger.debug(f"Load progress: {current}/{total} - {filename}")
         if self.progress_dialog is not None:
             self.progress_dialog.setMaximum(total)
             self.progress_dialog.setValue(current)
@@ -703,6 +784,7 @@ class MainWindow(QWidget):
             
     def _on_file_found(self, path: str, name: str):
         """Add validated file to list."""
+        logger.debug(f"File found and added to list: {path}")
         item = QListWidgetItem(name)
         item.setData(Qt.ItemDataRole.UserRole, path)
         item.setToolTip(path)
@@ -902,6 +984,7 @@ class MainWindow(QWidget):
 
     def start_conversion(self):
         """Start batch conversion process."""
+        logger.debug("Start conversion requested")
         # Collect input files
         inputs = [
             self.file_list.item(i).data(Qt.ItemDataRole.UserRole)
@@ -909,12 +992,14 @@ class MainWindow(QWidget):
         ]
 
         if not inputs:
+            logger.debug("No files to convert (user alerted)")
             QMessageBox.warning(self, 'No Files', 'Add files to convert first.')
             return
 
         # Build conversion jobs
         jobs = self._build_conversion_jobs(inputs)
         if not jobs:
+            logger.debug("No conversion jobs after build (maybe all skipped).")
             return
 
         self.current_jobs = jobs  # Store for deletion after conversion
@@ -922,6 +1007,7 @@ class MainWindow(QWidget):
         # Determine if originals should be deleted (with double confirmation)
         delete_original = False
         if self.delete_original_check.isChecked():
+            logger.debug("User requested deletion of originals; requesting confirmations.")
             reply1 = QMessageBox.question(
                 self, 'Delete Original Files',
                 f'Are you sure you want to delete the {len(jobs)} original file{"s" if len(jobs) != 1 else ""} after conversion?',
@@ -937,8 +1023,14 @@ class MainWindow(QWidget):
                 )
                 if reply2 == QMessageBox.StandardButton.Yes:
                     delete_original = True
+                    logger.debug("User confirmed deletion of originals.")
+                else:
+                    logger.debug("User declined final deletion confirmation.")
+            else:
+                logger.debug("User declined deletion confirmation (first prompt).")
 
         # Run conversion in thread
+        logger.debug(f"Spawning conversion thread, delete_original={delete_original}")
         self.conversion_thread = QThread()
         self.conversion_worker = ConversionWorker(jobs)
         self.conversion_worker.moveToThread(self.conversion_thread)
@@ -949,6 +1041,7 @@ class MainWindow(QWidget):
         self.conversion_worker.all_done.connect(self._on_conversion_finished)
         
         self.conversion_thread.start()
+        logger.debug("Conversion QThread started")
 
     def _build_conversion_jobs(self, inputs: List[str]) -> List[ConversionJob]:
         """Build list of conversion jobs."""
@@ -1028,11 +1121,13 @@ class MainWindow(QWidget):
 
     def _on_conversion_progress(self, current: int, total: int):
         """Update conversion progress."""
+        logger.debug(f"Conversion progress: {current}/{total}")
         self.progress_bar.setValue(int(current / total * 100))
         self.status.setText(f'Converting: {current}/{total}')
 
     def _on_conversion_finished(self, success: int, total: int):
         """Conversion complete."""
+        logger.debug(f"Conversion finished: success={success} total={total}")
         self.convert_btn.setEnabled(True)
         self.progress_bar.setValue(100)
         
